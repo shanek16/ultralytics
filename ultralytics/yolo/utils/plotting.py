@@ -72,6 +72,9 @@ class Annotator:
         self.limb_color = colors.pose_palette[[9, 9, 9, 9, 7, 7, 7, 0, 0, 0, 0, 0, 16, 16, 16, 16, 16, 16, 16]]
         self.kpt_color = colors.pose_palette[[16, 16, 16, 16, 16, 0, 0, 0, 0, 0, 0, 9, 9, 9, 9, 9, 9]]
 
+    def center_circle(self, center_x, center_y):
+        cv2.circle(self.im, (center_x, center_y), radius=5, color=(0,0,255), thickness=-1)
+
     def box_label(self, box, label='', color=(128, 128, 128), txt_color=(255, 255, 255)):
         """Add one xyxy box to image with label."""
         if isinstance(box, torch.Tensor):
@@ -191,6 +194,14 @@ class Annotator:
     def rectangle(self, xy, fill=None, outline=None, width=1):
         """Add rectangle to image (PIL-only)."""
         self.draw.rectangle(xy, fill, outline, width)
+
+    def warning(self, box, color=(0, 0, 200), alpha = 0.4):
+        if isinstance(box, torch.Tensor):
+            box = box.tolist()
+        overlay = self.im.copy()
+        p1, p2 = (int(box[0]), int(box[1])), (int(box[2]), int(box[3]))
+        cv2.rectangle(overlay, p1, p2, color, -1, lineType=cv2.LINE_AA)
+        self.im = cv2.addWeighted(overlay, alpha, self.im, 1-alpha, 0)
 
     def text(self, xy, text, txt_color=(255, 255, 255), anchor='top'):
         """Adds text to an image using PIL or cv2."""

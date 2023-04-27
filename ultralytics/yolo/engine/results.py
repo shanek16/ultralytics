@@ -11,6 +11,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import cv2
 
 from ultralytics.yolo.data.augment import LetterBox
 from ultralytics.yolo.utils import LOGGER, SimpleClass, deprecation_warn, ops
@@ -155,6 +156,11 @@ class Results(SimpleClass):
         """Return a list of non-empty attribute names."""
         return [k for k in self._keys if getattr(self, k) is not None]
 
+    def center(self, bbox):
+        x = (bbox[0] + bbox[2])/2
+        y = (bbox[1] + bbox[3])/2
+        return [x,y]
+
     def plot(
             self,
             conf=True,
@@ -216,11 +222,80 @@ class Results(SimpleClass):
             annotator.masks(pred_masks.data, colors=[colors(x, True) for x in pred_boxes.cls], im_gpu=img_gpu)
 
         if pred_boxes and show_boxes:
+            ladder_bbox = []
+            forklift_bbox = []
+            person_bbox = []
+            head_bbox = []
+            driver_in_forklift = False
+            warning = False
             for d in reversed(pred_boxes):
                 c, conf, id = int(d.cls), float(d.conf) if conf else None, None if d.id is None else int(d.id.item())
+                if conf > 0.25:
+                    if c == 0: # ladder
+                        ladder_bbox.append(d.xyxy.squeeze())
+                    elif c == 1: #'forklift'
+                        forklift_bbox.append(d.xyxy.squeeze())
+                    elif c == 2: # person~
+                        person_bbox.append(d.xyxy.squeeze())
+                    else:
+                        head_bbox.append(d.xyxy.squeeze())
                 name = ('' if id is None else f'id:{id} ') + names[c]
                 label = (f'{name} {conf:.2f}' if conf else name) if labels else None
                 annotator.box_label(d.xyxy.squeeze(), label, color=colors(c, True))
+                if len(forklift_bbox) > 0:
+                    for forklift in forklift_bbox:
+                        forklift_length = (forklift[2]-forklift[0])/2 # forklift[3]-forklift[1])
+                        for p in person_bbox:
+                            center_px = self.center(p)[0] # center of person x
+                            center_py = self.center(p)[1] # center of person y
+                            annotator.center_circle(int(center_px), int(center_py))
+                            if (forklift[0] < center_px < forklift[2]) and \
+                                (forklift[1] < center_py < forklift[3]): # forklift[0]~forklift[2]: x interval, forklift[1]~forklift[3]: y interval                                
+                                driver_in_forklift = True
+                                # print('person_bbox: ', person_bbox)
+                                # print('p: ', p)
+                                try:
+                                    person_bbox.remove(p) # remove driver from in_danger_list
+                                except:
+                                    pass
+                                # print('person_bbox: ', person_bbox)
+                                break
+                        if driver_in_forklift:
+                            # print('driver in forklift')
+                            x1 = max(forklift[0] - forklift_length,2) # margin
+                            x2 = min(forklift[2] + forklift_length, self.orig_img.shape[1]-4)
+                            y1 = max(forklift[1] - forklift_length,4)
+                            y2 = min(forklift[3] + forklift_length, self.orig_img.shape[0])
+                            x1y1x2y2 = [x1,y1,x2,y2]
+                            for p in person_bbox:
+                                center_px = self.center(p)[0] # center of person x
+                                center_py = self.center(p)[1] # center of person y
+                                if (x1 < center_px < forklift[0] or forklift[2] < center_px < x2) and \
+                                    (forklift[1] < center_py <  forklift[3]): # approachable boundary threshold around forklift: forklift_length pixels
+                                    warning = True
+                                    # print(f'center_px, center_py: ({center_px},{center_py})')
+                                    # print('-'*5,'Person is near forklift. Warning!!','-'*5)
+                            # for h in head_bbox:
+                            #     center_hx = self.center(h)[0] # center of person x
+                            #     center_hy = self.center(h)[1] # center of person y
+                            #     if (x1 < center_hx < forklift[0] or forklift[2] < center_hx < x2) and \
+                            #         (forklift[1] < center_hy <  forklift[3]): # approachable boundary threshold around forklift: forklift_length pixels
+                            #         warning = True
+                            if warning:
+                                annotator.box_label(x1y1x2y2, 'Warning!!', color=(0,0,255))
+                                annotator.warning(x1y1x2y2)
+                if len(ladder_bbox) > 0:
+                    for ladder in ladder_bbox:
+                        for p in person_bbox:
+                            center_px = self.center(p)[0] # center of person x
+                            center_py = self.center(p)[1] # center of person y
+                            annotator.center_circle(int(center_px), int(center_py))
+                            # print(f'{ladder[0]} < {center_px} < {ladder[2]}')
+                            # print(f'{ladder[3]} > {center_py}')
+                            if ladder[0] < center_px < ladder[2] and \
+                                ladder[3] > center_py: # count pixel from above: ladder y1 < center_py
+                                # print('-'*3,'Person is on the ladder keep watching!','-'*3)
+                                annotator.box_label(p, 'Caution!!', color=(255,0,0))
 
         if pred_probs is not None and show_probs:
             n5 = min(len(names), 5)
