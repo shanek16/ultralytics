@@ -195,7 +195,7 @@ class Annotator:
         """Add rectangle to image (PIL-only)."""
         self.draw.rectangle(xy, fill, outline, width)
 
-    def warning(self, box, color=(0, 0, 200), alpha = 0.4):
+    def warning(self, box, color=(0, 0, 200), alpha = 0.2):
         if isinstance(box, torch.Tensor):
             box = box.tolist()
         overlay = self.im.copy()
