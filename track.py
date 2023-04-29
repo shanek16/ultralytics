@@ -26,16 +26,38 @@ box_annotator = sv.BoxAnnotator(
 # Initialize variables for previous frame and previous tracks
 prev_frame = None
 prev_tracks = None
-xyxy_buffer = np.zeros((2,100), dtype=object)
+buffer = np.zeros((4,100), dtype=object)
+# coloumn
+#------------------
+# class_id
+# current_[cx,cy]
+# previous [cx,cy]
+# mean [vx,vy]
+#-------------------
 v_buffer = []
+prev_tracker_id = 0
 
-# mean averge filter
-def mean_last_rows(lst, window=5):
-    n = min(len(lst), window)
-    last_n_rows = np.array(lst[-n:])
-    return np.mean(last_n_rows, axis=0)
-# Savitzky-Golay filter for polynomial fitting
-# https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.savgol_filter.html
+def L2(p1,p2):
+    if isinstance(p1, np.ndarray) and isinstance(p2, np.ndarray):
+        p1x,p1y = p1.flatten()
+        p2x,p2y = p2.flatten()
+        return np.sqrt((p2x-p1x)**2 + (p2y-p1y)**2)
+    else: # either point is 0
+        return 100
+
+def risk_plot(frame, flow, buffer, mv, tracker_id, constant):
+                        pt1x = int(buffer[2][tracker_id-1][0]) # prev_posx
+                        pt1y = int(buffer[2][tracker_id-1][1]) # prev_posy
+                        mvx = mv[tracker_id-1][0]
+                        mvy = mv[tracker_id-1][1]
+                        if flow == 'sector':
+                            r = int(np.linalg.norm(mv[tracker_id-1]))
+                            direction = np.arctan2(mvy, mvx) * 180 / np.pi
+                            frame = risk_area(frame, center=(pt1x, pt1y), r=constant*r, theta=direction)
+                        else:
+                            pt2x = pt1x + constant*int(mvx)
+                            pt2y = pt1y + constant*int(mvy)
+                            frame = cv2.arrowedLine(frame, pt1=(pt1x, pt1y), pt2=(pt2x, pt2y), color=(0,0,255), thickness=2)
 
 with VideoSink(TARGET_VIDEO_PATH, video_info) as sink:
     for result in model.track(source = SOURCE_VIDEO_PATH, stream = True, agnostic_nms = True, tracker = "botsort.yaml"):
@@ -45,53 +67,81 @@ with VideoSink(TARGET_VIDEO_PATH, video_info) as sink:
             detections.tracker_id = result.boxes.id.cpu().numpy().astype(int)
             labels = [
                 f'#{tracker_id} {model.model.names[class_id]}{confidence:0.2f}'
-                for xyxy, mask, confidence,  class_id, tracker_id
+                for _, _, confidence,  class_id, tracker_id
                 in detections 
             ]
         
             frame = box_annotator.annotate(scene = frame, detections = detections, labels = labels)
 
+            # if new tracker_id: input class info into buffer[0]
+            max_tracker_id = max(detections.tracker_id)
+            for tracker_id in range(prev_tracker_id, max_tracker_id): # prev~ max_id-1
+                buffer[0][tracker_id] = detections.class_id[tracker_id]
+            prev_tracker_id = max_tracker_id
+
             # Calculate velocities and directions of tracked objects
-            if prev_frame is not None and prev_tracks is not None:
+            if prev_tracks is not None: # and prev_frame is not None and 
                 # Get position of object in current frame
+                for xyxy, mask, confidence, class_id, tracker_id in detections:
+                    x1, y1, x2, y2 = xyxy
+                    cx = (x1 + x2) / 2
+                    cy = (y1 + y2) / 2
+                    buffer[1][tracker_id-1] = np.array([cx,cy]) # current cx,cy
+                    buffer[3][tracker_id-1] = detections.xyxy[0] # current xyxy
+                
+                v = buffer[1] - buffer[2]
+                v_buffer.append(v)
+                if len(v_buffer) > window:
+                    v_buffer.pop(0)
+                # mean averge filter
+                if len(v_buffer) > 1:
+                    mv = np.mean(np.array(v_buffer), axis=1) # resulting np.array of size 100
+                else:
+                    mv = v
+                # Savitzky-Golay filter for polynomial fitting
+                # https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.savgol_filter.html
+                
+                detected_forklift_tracker_id =[]
+                detected_person_tracker_id = []
+                #            0           1          2        3      
+                # names: ['ladder', 'fork_lift', 'person','head'] 
+                for xyxy, mask, confidence, class_id, tracker_id in detections:
+                    if class_id == 1: # forklift
+                        detected_forklift_tracker_id.append(tracker_id)
+                    if class_id == 2: # person
+                        detected_person_tracker_id.append(tracker_id)
+                
+                for tracker_id in detected_forklift_tracker_id:
+                    risk_plot(frame, flow, buffer, mv, tracker_id, constant)
+
+
+                for forklift_id in detected_forklift_tracker_id:
+                    forklift_x1 = buffer[3][forklift_id-1][0]
+                    forklift_x2 = buffer[3][forklift_id-1][2]
+                    forklift_y1 = buffer[3][forklift_id-1][1]
+                    forklift_y2 = buffer[3][forklift_id-1][3]
+                    for person_id in detected_person_tracker_id:
+                    # if person is not driver:
+                        person_cx = buffer[1][person_id-1][0]
+                        person_cy = buffer[1][person_id-1][1]
+                        if person_cx < forklift_x1 or\
+                            person_cx > forklift_x2 or\
+                            person_cy < forklift_y1 or\
+                            person_cy > forklift_y2:
+                            risk_plot(frame, flow, buffer, mv, person_id, constant)
+                buffer[2] = buffer[1]
+            else:
                 for xyxy, mask, confidence,  class_id, tracker_id in detections:
-                    if class_id == 1 or class_id == 2:
-                        x1, y1, x2, y2 = xyxy
-                        cx = (x1 + x2) / 2
-                        cy = (y1 + y2) / 2
-                        xyxy_buffer[0][tracker_id-1] = (cx,cy)
-
-                # Get position of object in previous frame
-                for xyxy, mask, confidence,  class_id, tracker_id in prev_tracks:
-                    if class_id == 1 or class_id == 2:
-                        px1, py1, px2, py2 = xyxy
-                        pcx = (px1 + px2) / 2
-                        pcy = (py1 + py2) / 2
-                        xyxy_buffer[1][tracker_id-1] = (pcx,pcy)
-
-                for prev_point, current_point in zip(xyxy_buffer[1], xyxy_buffer[0]):
-                    if prev_point != 0 and current_point !=0:
-                        # Calculate velocity vector of object
-                        vx = current_point[0] - prev_point[0]
-                        vy = current_point[1] - prev_point[1]
-                        v_buffer.append([vx,vy])
-                        if len(v_buffer) > window:
-                            v_buffer.pop(0)
-                        mvx, mvy = mean_last_rows(v_buffer, window=window)
-                        pt1x = int(prev_point[0])
-                        pt1y = int(prev_point[1])
-                        # pt2x = pt1x + constant*int(mvx)
-                        # pt2y = pt1y + constant*int(mvy)
-                        # frame = cv2.arrowedLine(frame, pt1=(pt1x, pt1y), pt2=(pt2x, pt2y), color=(0,0,255), thickness=2)
-                        r = int(constant*np.sqrt(mvx**2 + mvy**2))
-                        direction = np.arctan2(mvy, mvx) * 180 / np.pi
-                        frame = risk_area(frame, center=(pt1x, pt1y), r=r, theta=direction)
-
+                    # if class_id == 1 or class_id == 2:
+                    x1, y1, x2, y2 = xyxy
+                    cx = (x1 + x2) / 2
+                    cy = (y1 + y2) / 2
+                    buffer[2][tracker_id-1] = np.array([cx,cy]) # previous row
         # Display frame with tracks and count
         # cv2.imshow("Frame", frame)
 
         # Update previous frame and previous tracks variables
-        prev_frame = frame.copy()
+        # prev_frame = frame.copy()
         prev_tracks = detections
 
         sink.write_frame(frame)
