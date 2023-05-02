@@ -21,7 +21,7 @@ if __name__ == "__main__":
     # Create a black image of the desired size
     img = 255*np.ones((800, 800, 3), dtype=np.uint8)
 
-    img = risk_area(img, center, r, theta=30)
+    img = risk_area(img, center, r, theta=0)
 
     # Display the resulting image
     cv2.imshow("Semitransparent Annular Sector", img)

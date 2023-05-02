@@ -6,13 +6,15 @@ import supervision as sv
 from supervision.video  import VideoSink, VideoInfo
 from sector import risk_area
 
-window = 5
+window = 10
 constant = 40
 flow = 'sector' # arrow
 current_file_path = os.path.dirname(os.path.abspath(__file__))
-SOURCE_VIDEO_PATH = current_file_path + "/../../data/safety/video/fork4_1min.mp4"
-EXPLAIN_VIDEO_PATH = current_file_path + f"/../runs/warn/Explain_BoTSORT_fork4_window{window}_{flow}_x{constant}.mp4"
-WARNING_VIDEO_PATH = current_file_path + f"/../runs/warn/Warning_BoTSORT_fork4_window{window}_{flow}_x{constant}.mp4"
+file_name = 'forklift_driver_1min'
+SOURCE_VIDEO_PATH = current_file_path + f"/../../data/safety/video/{file_name}.mp4"
+EXPLAIN_VIDEO_PATH = current_file_path + f"/../runs/warn/Explain_BoTSORT_{file_name}_window{window}_{flow}_x{constant}.mp4"
+WARNING_VIDEO_PATH = current_file_path + f"/../runs/warn/Warning_BoTSORT_{file_name}_window{window}_{flow}_x{constant}.mp4"
+DEBUG_VIDEO_PATH = current_file_path + f"/../runs/warn/DEBUG.mp4"
 # Initialize YOLOv8 object detector
 video_info = VideoInfo.from_video_path(SOURCE_VIDEO_PATH)
 model = YOLO(current_file_path + "/../runs/detect/train4/weights/best.pt")
@@ -25,10 +27,12 @@ box_annotator = sv.BoxAnnotator(
 
 # Initialize variables for previous frame and previous tracks
 prev_tracks = None
-pos_buffer = np.full((window,100), fill_value=None, dtype=object)
-box_buffer = np.full(100, fill_value=None, dtype=object)
-mv_buffer = np.full(100, fill_value=None, dtype=object)
-white_img = 255*np.ones((video_info.height, video_info.width, 3), dtype=np.uint8)
+pos_buffer = np.full((window,300), fill_value=None, dtype=object)
+box_buffer = np.full(300, fill_value=None, dtype=object)
+mv_buffer = np.full(300, fill_value=None, dtype=object)
+height = video_info.height
+width = video_info.width
+white_img = 255*np.ones((height, width, 3), dtype=np.uint8)
 
 def L2(p1,p2):
     if isinstance(p1, np.ndarray) and isinstance(p2, np.ndarray):
@@ -81,7 +85,7 @@ def warning(frame, xyxy, color=(0, 0, 255), alpha = 0.2):
 
 # explainable_video = VideoSink(EXPLAIN_VIDEO_PATH, video_info)
 # warning_video = VideoSink(WARNING_VIDEO_PATH, video_info)
-
+out = cv2.VideoWriter(DEBUG_VIDEO_PATH, cv2.VideoWriter_fourcc(*'mp4v'), video_info.fps, (2 * width, 2 * height))
 with VideoSink(EXPLAIN_VIDEO_PATH, video_info) as explainable_video:
     with VideoSink(WARNING_VIDEO_PATH, video_info) as warning_video:
         i = 0
@@ -99,6 +103,8 @@ with VideoSink(EXPLAIN_VIDEO_PATH, video_info) as explainable_video:
                 frame = box_annotator.annotate(scene = frame, detections = detections, labels = labels)
                 explainable_frame = frame.copy()
                 warning_frame = frame.copy()
+                forklift_yellow_mask = np.zeros((height, width), dtype=np.uint8)
+                person_yellow_mask = np.zeros((height, width), dtype=np.uint8)
                 # Calculate velocities and directions of tracked objects
                 if prev_tracks is not None:
                     # Get position of object in current frame
@@ -136,8 +142,12 @@ with VideoSink(EXPLAIN_VIDEO_PATH, video_info) as explainable_video:
                         forklift_y2 = box_buffer[forklift_id-1][3]
                         for person_id in detected_person_tracker_id:
                         # if person is not driver:
-                            person_cx = current_pos[person_id-1][0]
-                            person_cy = current_pos[person_id-1][1]
+                            person_x1 = int(box_buffer[person_id-1][0])
+                            person_x2 = int(box_buffer[person_id-1][2])
+                            person_y1 = int(box_buffer[person_id-1][1])
+                            person_y2 = int(box_buffer[person_id-1][3])
+                            person_cx = int(current_pos[person_id-1][0])
+                            person_cy = int(current_pos[person_id-1][1])
                             if person_cx < forklift_x1 or\
                                 person_cx > forklift_x2 or\
                                 person_cy < forklift_y1 or\
@@ -145,8 +155,11 @@ with VideoSink(EXPLAIN_VIDEO_PATH, video_info) as explainable_video:
                                 person_frame = risk_plot(white_img, flow, current_pos, mv_buffer, person_id, constant)
                                 explainable_frame = risk_plot(explainable_frame, flow, current_pos, mv_buffer, person_id, constant)
                                 person_red_mask = cv2.inRange(person_frame,(153, 153, 255), (153, 153, 255))
+                                person_red_mask[person_y1:person_y2, person_x1:person_x2] = 255
                                 person_orange_mask = cv2.inRange(person_frame, (153, 219, 255), (153, 219, 255))
+                                person_orange_mask[person_y1:person_y2, person_x1:person_x2] = 255
                                 person_yellow_mask = cv2.inRange(person_frame, (153, 255, 255), (153, 255, 255))
+                                person_yellow_mask[person_y1:person_y2, person_x1:person_x2] = 255
                                 
                                 # xyxy for warning frame
                                 index_forklift_id = np.where(detections.tracker_id == forklift_id)[0][0]
@@ -156,24 +169,27 @@ with VideoSink(EXPLAIN_VIDEO_PATH, video_info) as explainable_video:
                                 y1 = min(detections.xyxy[index_forklift_id][1], detections.xyxy[index_person_id][1])
                                 y2 = max(detections.xyxy[index_forklift_id][3], detections.xyxy[index_person_id][3])
                                 # Check for overlapping sectors
-                                if cv2.countNonZero(cv2.bitwise_and(forklift_red_mask, person_red_mask)) > 0:
-                                    print('emergency')
+                                emergency_mask = cv2.bitwise_and(forklift_red_mask, person_red_mask)
+                                danger_mask = cv2.bitwise_and(forklift_orange_mask, person_orange_mask)
+                                warning_mask = cv2.bitwise_and(forklift_yellow_mask, person_yellow_mask)
+                                if cv2.countNonZero(emergency_mask) > 0:
+                                    # print('emergency')
                                     warning_frame = warning(warning_frame, [x1,y1,x2,y2], color=(0,0,255))
                                     # input()
-                                elif cv2.countNonZero(cv2.bitwise_and(forklift_orange_mask, person_orange_mask)) > 0:
-                                    print('danger')
+                                elif cv2.countNonZero(danger_mask) > 0:
+                                    # print('danger')
                                     warning_frame = warning(warning_frame, [x1,y1,x2,y2], color=(0,165,255))
                                     # input()                                    
-                                elif cv2.countNonZero(cv2.bitwise_and(forklift_yellow_mask, person_yellow_mask)) > 0:
-                                    print('warning')
+                                elif cv2.countNonZero(warning_mask) > 0:
+                                    # print('warning')
                                     warning_frame = warning(warning_frame, [x1,y1,x2,y2], color=(0,255,255))
                                     # input()
 
                     if i == window -1: # if buffer is full
                         pos_buffer[:-1, :] = pos_buffer[1:, :]
                         pos_buffer[-1, :] = None
-                    mv_buffer = np.full(100, None, dtype=object)
-                    box_buffer = np.full(100, None, dtype=object)
+                    mv_buffer = np.full(300, None, dtype=object)
+                    box_buffer = np.full(300, None, dtype=object)
                 else:
                     for xyxy, mask, confidence,  class_id, tracker_id in detections:
                         # if class_id == 1 or class_id == 2:
@@ -188,3 +204,16 @@ with VideoSink(EXPLAIN_VIDEO_PATH, video_info) as explainable_video:
             # cv2.imshow("Frame", frame)
             explainable_video.write_frame(explainable_frame)
             warning_video.write_frame(warning_frame)
+
+            # create an empty canvas with twice the width and height of the frames
+            canvas = np.zeros((2 * height, 2 * width, 3), dtype=np.uint8)
+
+            # place each frame in the appropriate quadrant of the canvas
+            canvas[:height, :width] = explainable_frame
+            canvas[:height, width:] = warning_frame
+            canvas[height:, :width] = cv2.cvtColor(forklift_yellow_mask, cv2.COLOR_GRAY2BGR)
+            canvas[height:, width:] = cv2.cvtColor(person_yellow_mask, cv2.COLOR_GRAY2BGR)
+
+            # write the canvas to the output video file
+            out.write(canvas)
+out.release()
