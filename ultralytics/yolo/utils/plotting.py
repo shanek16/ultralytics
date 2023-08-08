@@ -196,6 +196,14 @@ class Annotator:
         self.draw.rectangle(xy, fill, outline, width)
 
     def warning(self, box, color=(0, 0, 200), alpha = 0.2):
+        """
+        Applies a warning overlay to the image.
+
+        Args:
+            box (torch.Tensor or list): The coordinates of the bounding box to apply the warning overlay.
+            color (tuple, optional): The color of the warning overlay in BGR format. Defaults to (0, 0, 200).
+            alpha (float, optional): The transparency of the warning overlay. Defaults to 0.2.
+        """
         if isinstance(box, torch.Tensor):
             box = box.tolist()
         overlay = self.im.copy()

@@ -29,7 +29,7 @@ box_annotator = sv.BoxAnnotator(
 prev_tracks = None
 pos_buffer = np.full((window,300), fill_value=None, dtype=object)
 box_buffer = np.full(300, fill_value=None, dtype=object)
-mv_buffer = np.full(300, fill_value=None, dtype=object)
+mv_buffer = np.full(300, fill_value=None, dtype=object) # seems like mean velocity buffer
 height = video_info.height
 width = video_info.width
 white_img = 255*np.ones((height, width, 3), dtype=np.uint8)
@@ -77,6 +77,18 @@ def risk_plot(frame, flow, current_pos, mv_buffer, tracker_id, constant):
     return frame
 
 def warning(frame, xyxy, color=(0, 0, 255), alpha = 0.2):
+    """
+    Apply a warning bounding box overlay to a given frame.
+
+    Parameters:
+    - frame: The input frame to apply the warning overlay to.
+    - xyxy: A tuple representing the bounding box coordinates (x1, y1, x2, y2).
+    - color: Optional. The color of the warning overlay in BGR format. Default is (0, 0, 255) (red).
+    - alpha: Optional. The transparency of the warning overlay. Default is 0.2.
+
+    Returns:
+    - The frame with the warning bounding box overlay applied.
+    """
     overlay = frame.copy()
     p1, p2 = (int(xyxy[0]), int(xyxy[1])), (int(xyxy[2]), int(xyxy[3]))
     overlay = cv2.rectangle(overlay, p1, p2, color, -1, lineType=cv2.LINE_AA)
@@ -141,13 +153,13 @@ with VideoSink(EXPLAIN_VIDEO_PATH, video_info) as explainable_video:
                         forklift_y1 = box_buffer[forklift_id-1][1]
                         forklift_y2 = box_buffer[forklift_id-1][3]
                         for person_id in detected_person_tracker_id:
-                        # if person is not driver:
                             person_x1 = int(box_buffer[person_id-1][0])
                             person_x2 = int(box_buffer[person_id-1][2])
                             person_y1 = int(box_buffer[person_id-1][1])
                             person_y2 = int(box_buffer[person_id-1][3])
                             person_cx = int(current_pos[person_id-1][0])
                             person_cy = int(current_pos[person_id-1][1])
+                            # if person is not driver:
                             if person_cx < forklift_x1 or\
                                 person_cx > forklift_x2 or\
                                 person_cy < forklift_y1 or\

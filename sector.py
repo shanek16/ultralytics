@@ -2,6 +2,19 @@ import cv2
 import numpy as np
 
 def risk_area(img, center, r, theta, alpha=0.4):
+    """
+    Generates a risk area overlay on an image.
+    
+    Args:
+        img (numpy.ndarray): The input image.
+        center (tuple): The center coordinates of the ellipse.
+        r (int): The radius of the ellipse.
+        theta (float): The angle in degrees at which the ellipse is rotated.
+        alpha (float, optional): The transparency value for the overlay. Defaults to 0.4.
+        
+    Returns:
+        numpy.ndarray: The image with the risk area overlay.
+    """
     # Define the angles for each of the three sectors
     angle1 = theta - 30
     angle2 = theta + 30
