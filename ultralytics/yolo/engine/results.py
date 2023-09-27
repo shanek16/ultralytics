@@ -292,10 +292,18 @@ class Results(SimpleClass):
                             annotator.center_circle(int(center_px), int(center_py))
                             # print(f'{ladder[0]} < {center_px} < {ladder[2]}')
                             # print(f'{ladder[3]} > {center_py}')
-                            if ladder[0] < center_px < ladder[2] and \
-                                ladder[3] > center_py: # count pixel from above: ladder y1 < center_py
-                                # print('-'*3,'Person is on the ladder keep watching!','-'*3)
-                                annotator.box_label(p, 'Caution!!', color=(255,0,0))
+                            ladder_height = ladder[3] - ladder[1]  # y2 - y1
+                            mid_height = ladder[1] + 0.5 * ladder_height
+                            if ladder[0] < center_px < ladder[2]:
+                                if mid_height <= center_py <= ladder[3]:
+                                    annotator.box_label(p, 'Caution!!', color=(255,0,0))
+                                elif ladder[3] < center_py:
+                                    print('Warning!!')
+                                    annotator.box_label(p, 'Warning!!', color=(255,0,0))
+                            # if ladder[0] < center_px < ladder[2] and \
+                            #     ladder[3] > center_py: # count pixel from above: ladder y1 < center_py
+                            #     # print('-'*3,'Person is on the ladder keep watching!','-'*3)
+                            #     annotator.box_label(p, 'Caution!!', color=(255,0,0))
 
         if pred_probs is not None and show_probs:
             n5 = min(len(names), 5)

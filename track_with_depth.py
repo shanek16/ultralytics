@@ -5,19 +5,27 @@ from ultralytics import YOLO
 import supervision as sv
 from supervision.video  import VideoSink, VideoInfo
 from sector import risk_area
+import torch
 
 window = 10
 constant = 40
 flow = 'sector' # arrow
 current_file_path = os.path.dirname(os.path.abspath(__file__))
-file_name = 'fork4'
+file_name = 'ladder1'
 SOURCE_VIDEO_PATH = current_file_path + f"/../../data/safety/video/{file_name}.mp4"
-EXPLAIN_VIDEO_PATH = current_file_path + f"/../runs/warn/Explain_BoTSORT_{file_name}_window{window}_{flow}_x{constant}_before.mp4"
-WARNING_VIDEO_PATH = current_file_path + f"/../runs/warn/Warning_BoTSORT_{file_name}_window{window}_{flow}_x{constant}_before.mp4"
-DEBUG_VIDEO_PATH = current_file_path + f"/../runs/warn/DEBUG_0906.mp4"
+EXPLAIN_VIDEO_PATH = current_file_path + f"/../runs/warn/Explain_BoTSORT_{file_name}_window{window}_{flow}_x{constant}.mp4"
+WARNING_VIDEO_PATH = current_file_path + f"/../runs/warn/Warning_BoTSORT_{file_name}_window{window}_{flow}_x{constant}.mp4"
+DEBUG_VIDEO_PATH = current_file_path + f"/../runs/warn/DEBUG.mp4"
 # Initialize YOLOv8 object detector
 video_info = VideoInfo.from_video_path(SOURCE_VIDEO_PATH)
 model = YOLO(current_file_path + "/../runs/detect/train4/weights/best.pt")
+# Load MiDaS
+midas = torch.hub.load("intel-isl/MiDaS", "DPT_Large")
+device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+midas.to(device)
+midas.eval()
+midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms")
+transform = midas_transforms.dpt_transform
 
 box_annotator = sv.BoxAnnotator(
     thickness = 2,
@@ -95,6 +103,41 @@ def warning(frame, xyxy, color=(0, 0, 255), alpha = 0.2):
     frame = cv2.addWeighted(overlay, alpha, frame, 1-alpha, 0)
     return frame
 
+def compute_parameter(p1, p2, d1, d2):
+    a = (d1 - d2) / (1 / p1 - 1 / p2)
+    b = d1 - a / p1
+    return a, b
+
+def compute_median_distance(depth_map):
+    """
+    Use Otsu's thresholding to distinguish the background, compute the median distance 
+    of the non-background pixels, and save the visualized result.
+
+    Parameters:
+        depth_map (numpy array): 2D depth map.
+        save_path (str): Path to save the visualized result.
+
+    Returns:
+        median_distance (float): Median distance of the non-background pixels.
+    """
+    
+    # Ensure the depth_map is in 8-bit format for Otsu's method in cv2
+    normalized_map = ((depth_map - depth_map.min()) * (255.0 / (depth_map.max() - depth_map.min()))).astype(np.uint8)
+    
+    # Compute Otsu's threshold value
+    _, otsu_binary = cv2.threshold(normalized_map, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    
+    # Calculate the threshold value in the original depth map scale
+    threshold_value = depth_map.min() + (depth_map.max() - depth_map.min()) * (_ / 255.0)
+    
+    # Mask non-background pixels
+    non_background_pixels = depth_map[depth_map < threshold_value]
+
+    # Compute the median of the non-background pixels
+    median_distance = np.median(non_background_pixels)
+    
+    return median_distance
+
 # explainable_video = VideoSink(EXPLAIN_VIDEO_PATH, video_info)
 # warning_video = VideoSink(WARNING_VIDEO_PATH, video_info)
 out = cv2.VideoWriter(DEBUG_VIDEO_PATH, cv2.VideoWriter_fourcc(*'mp4v'), video_info.fps, (2 * width, 2 * height))
@@ -103,6 +146,27 @@ with VideoSink(EXPLAIN_VIDEO_PATH, video_info) as explainable_video:
         i = 0
         for result in model.track(source = SOURCE_VIDEO_PATH, stream = True, agnostic_nms = True, tracker = "botsort.yaml"):
             frame = result.orig_img
+
+            # Depth inference
+            img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            input_batch = transform(img).to(device)
+
+            with torch.no_grad():
+                prediction = midas(input_batch)
+                prediction = torch.nn.functional.interpolate(
+                    prediction.unsqueeze(1),
+                    size=img.shape[:2],
+                    mode="bicubic",
+                    align_corners=False,
+                ).squeeze()
+
+            output = prediction.cpu().numpy()
+            
+            # Get metric depth
+            a, b = compute_parameter(output[67, 200], output[700, 800], 1000, 200)
+            metric_depth = a / output + b
+
+            # Detection & Tracking inference
             detections = sv.Detections.from_yolov8(result)
             if result.boxes.id is not None:
                 detections.tracker_id = result.boxes.id.cpu().numpy().astype(int)
@@ -152,6 +216,9 @@ with VideoSink(EXPLAIN_VIDEO_PATH, video_info) as explainable_video:
                         forklift_x2 = box_buffer[forklift_id-1][2]
                         forklift_y1 = box_buffer[forklift_id-1][1]
                         forklift_y2 = box_buffer[forklift_id-1][3]
+                        depth_forklift = compute_median_distance(metric_depth[round(forklift_y1):round(forklift_y2),round(forklift_x1):round(forklift_x2)])
+                        cv2.putText(explainable_frame, str(round(depth_forklift, 2)), (round(forklift_x1) + 5, round(forklift_y2) - 10), cv2.FONT_HERSHEY_DUPLEX, 1.0, (0, 255, 0), 1)
+
                         for person_id in detected_person_tracker_id:
                             person_x1 = int(box_buffer[person_id-1][0])
                             person_x2 = int(box_buffer[person_id-1][2])
@@ -159,6 +226,8 @@ with VideoSink(EXPLAIN_VIDEO_PATH, video_info) as explainable_video:
                             person_y2 = int(box_buffer[person_id-1][3])
                             person_cx = int(current_pos[person_id-1][0])
                             person_cy = int(current_pos[person_id-1][1])
+                            depth_person = compute_median_distance(metric_depth[round(person_y1):round(person_y2),round(person_x1):round(person_x2)])
+                            cv2.putText(explainable_frame, str(round(depth_person, 2)), (round(person_x1) + 5, round(person_y2) - 10), cv2.FONT_HERSHEY_DUPLEX, 1.0, (0, 255, 0), 1)
                             # if person is not driver:
                             if person_cx < forklift_x1 or\
                                 person_cx > forklift_x2 or\
@@ -180,22 +249,24 @@ with VideoSink(EXPLAIN_VIDEO_PATH, video_info) as explainable_video:
                                 x2 = max(detections.xyxy[index_forklift_id][2], detections.xyxy[index_person_id][2])
                                 y1 = min(detections.xyxy[index_forklift_id][1], detections.xyxy[index_person_id][1])
                                 y2 = max(detections.xyxy[index_forklift_id][3], detections.xyxy[index_person_id][3])
+
                                 # Check for overlapping sectors
-                                emergency_mask = cv2.bitwise_and(forklift_red_mask, person_red_mask)
-                                danger_mask = cv2.bitwise_and(forklift_orange_mask, person_orange_mask)
-                                warning_mask = cv2.bitwise_and(forklift_yellow_mask, person_yellow_mask)
-                                if cv2.countNonZero(emergency_mask) > 0:
-                                    # print('emergency')
-                                    warning_frame = warning(warning_frame, [x1,y1,x2,y2], color=(0,0,255))
-                                    # input()
-                                elif cv2.countNonZero(danger_mask) > 0:
-                                    # print('danger')
-                                    warning_frame = warning(warning_frame, [x1,y1,x2,y2], color=(0,165,255))
-                                    # input()                                    
-                                elif cv2.countNonZero(warning_mask) > 0:
-                                    # print('warning')
-                                    warning_frame = warning(warning_frame, [x1,y1,x2,y2], color=(0,255,255))
-                                    # input()
+                                if abs(depth_forklift - depth_person) < 200.0:
+                                    emergency_mask = cv2.bitwise_and(forklift_red_mask, person_red_mask)
+                                    danger_mask = cv2.bitwise_and(forklift_orange_mask, person_orange_mask)
+                                    warning_mask = cv2.bitwise_and(forklift_yellow_mask, person_yellow_mask)
+                                    if cv2.countNonZero(emergency_mask) > 0:
+                                        # print('emergency')
+                                        warning_frame = warning(warning_frame, [x1,y1,x2,y2], color=(0,0,255))
+                                        # input()
+                                    elif cv2.countNonZero(danger_mask) > 0:
+                                        # print('danger')
+                                        warning_frame = warning(warning_frame, [x1,y1,x2,y2], color=(0,165,255))
+                                        # input()                                    
+                                    elif cv2.countNonZero(warning_mask) > 0:
+                                        # print('warning')
+                                        warning_frame = warning(warning_frame, [x1,y1,x2,y2], color=(0,255,255))
+                                        # input()
 
                     if i == window -1: # if buffer is full
                         pos_buffer[:-1, :] = pos_buffer[1:, :]
