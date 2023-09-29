@@ -1,5 +1,6 @@
 import cv2
 import os
+import time
 import numpy as np
 from ultralytics import YOLO
 import supervision as sv
@@ -11,7 +12,7 @@ window = 10
 constant = 40
 flow = 'sector' # arrow
 current_file_path = os.path.dirname(os.path.abspath(__file__))
-file_name = 'fork_container'
+file_name = 'fork_container_1min'
 SOURCE_VIDEO_PATH = current_file_path + f"/../../../../media/shane/44B4-A589/video/{file_name}.mp4"
 EXPLAIN_VIDEO_PATH = current_file_path + f"/../runs/warn/Explain_BoTSORT_{file_name}_window{window}_{flow}_x{constant}.mp4"
 WARNING_VIDEO_PATH = current_file_path + f"/../runs/warn/Warning_BoTSORT_{file_name}_window{window}_{flow}_x{constant}.mp4"
@@ -141,37 +142,42 @@ def compute_median_distance(depth_map):
     
     return median_distance
 
-# explainable_video = VideoSink(EXPLAIN_VIDEO_PATH, video_info)
-# warning_video = VideoSink(WARNING_VIDEO_PATH, video_info)
-out = cv2.VideoWriter(DEBUG_VIDEO_PATH, cv2.VideoWriter_fourcc(*'mp4v'), video_info.fps, (2 * width, 2 * height))
+# out = cv2.VideoWriter(DEBUG_VIDEO_PATH, cv2.VideoWriter_fourcc(*'mp4v'), video_info.fps, (2 * width, 2 * height))
 with VideoSink(EXPLAIN_VIDEO_PATH, video_info) as explainable_video:
     with VideoSink(WARNING_VIDEO_PATH, video_info) as warning_video:
         i = 0
+        # FPS and Throughput measurement
+        start_time = time.time()
+        frame_count = 0
+        total_data_processed_MB = 0
         for result in model.track(source = SOURCE_VIDEO_PATH, stream = True, agnostic_nms = True, tracker = "botsort.yaml"):
             frame = result.orig_img
+            frame_count += 1
+            frame_data_MB = frame.shape[0] * frame.shape[1] * frame.shape[2] * 8 / (8 * 1024 * 1024)  # 8 bits per channel
+            total_data_processed_MB += frame_data_MB
 
-            # Depth inference
-            img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            input_batch = transform(img).to(device)
-
-            with torch.no_grad():
-                prediction = midas(input_batch)
-                prediction = torch.nn.functional.interpolate(
-                    prediction.unsqueeze(1),
-                    size=img.shape[:2],
-                    mode="bicubic",
-                    align_corners=False,
-                ).squeeze()
-
-            output = prediction.cpu().numpy()
-            
-            # Get metric depth
-            a, b = compute_parameter(output[67, 200], output[700, 800], 1000, 200)
-            metric_depth = a / output + b
-
-            # Detection & Tracking inference
-            detections = sv.Detections.from_yolov8(result)
             if result.boxes.id is not None:
+                # Depth inference
+                img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                input_batch = transform(img).to(device)
+
+                with torch.no_grad():
+                    prediction = midas(input_batch)
+                    prediction = torch.nn.functional.interpolate(
+                        prediction.unsqueeze(1),
+                        size=img.shape[:2],
+                        mode="bicubic",
+                        align_corners=False,
+                    ).squeeze()
+
+                output = prediction.cpu().numpy()
+                
+                # Get metric depth
+                a, b = compute_parameter(output[67, 200], output[700, 800], 1000, 200)
+                metric_depth = a / output + b
+
+                # Detection & Tracking inference
+                detections = sv.Detections.from_yolov8(result)
                 detections.tracker_id = result.boxes.id.cpu().numpy().astype(int)
                 labels = [
                     f'#{tracker_id} {model.model.names[class_id]}{confidence:0.2f}'
@@ -288,18 +294,28 @@ with VideoSink(EXPLAIN_VIDEO_PATH, video_info) as explainable_video:
 
             # Display frame with tracks and count
             # cv2.imshow("Frame", frame)
+            # cv2.imshow("Explainable Frame", explainable_frame)
+            
+            # save frames
             explainable_video.write_frame(explainable_frame)
             warning_video.write_frame(warning_frame)
 
-            # create an empty canvas with twice the width and height of the frames
-            canvas = np.zeros((2 * height, 2 * width, 3), dtype=np.uint8)
+            # create an empty canvas with twice the width and height of the frames(to see 4 frames in one canvas: for debugging)
+            # canvas = np.zeros((2 * height, 2 * width, 3), dtype=np.uint8)
 
             # place each frame in the appropriate quadrant of the canvas
-            canvas[:height, :width] = explainable_frame
-            canvas[:height, width:] = warning_frame
-            canvas[height:, :width] = cv2.cvtColor(forklift_yellow_mask, cv2.COLOR_GRAY2BGR)
-            canvas[height:, width:] = cv2.cvtColor(person_yellow_mask, cv2.COLOR_GRAY2BGR)
+            # canvas[:height, :width] = explainable_frame
+            # canvas[:height, width:] = warning_frame
+            # canvas[height:, :width] = cv2.cvtColor(forklift_yellow_mask, cv2.COLOR_GRAY2BGR)
+            # canvas[height:, width:] = cv2.cvtColor(person_yellow_mask, cv2.COLOR_GRAY2BGR)
 
             # write the canvas to the output video file
-            out.write(canvas)
-out.release()
+            # out.write(canvas)
+        # Calculate FPS and Throughput
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        fps = frame_count / elapsed_time
+        throughput_MB_per_s = total_data_processed_MB / elapsed_time
+        print(f"Average FPS: {fps:.2f}")
+        print(f"Throughput: {throughput_MB_per_s:.2f} MB/s")
+# out.release()
