@@ -6,26 +6,29 @@ import supervision as sv
 from supervision.video  import VideoSink, VideoInfo
 from sector import risk_area
 import torch
+from midas.model_loader import default_models, load_model
 
 window = 10
 constant = 40
 flow = 'sector' # arrow
 current_file_path = os.path.dirname(os.path.abspath(__file__))
-file_name = 'ladder1'
+# file_name = 'ladder1'
+file_name = 'fork4' # container video
 SOURCE_VIDEO_PATH = current_file_path + f"/../../data/safety/video/{file_name}.mp4"
-EXPLAIN_VIDEO_PATH = current_file_path + f"/../runs/warn/Explain_BoTSORT_{file_name}_window{window}_{flow}_x{constant}.mp4"
-WARNING_VIDEO_PATH = current_file_path + f"/../runs/warn/Warning_BoTSORT_{file_name}_window{window}_{flow}_x{constant}.mp4"
+EXPLAIN_VIDEO_PATH = current_file_path + f"/../runs/warn/Explain_BoTSORT_{file_name}_window{window}_{flow}_x{constant}_d.mp4"
+WARNING_VIDEO_PATH = current_file_path + f"/../runs/warn/Warning_BoTSORT_{file_name}_window{window}_{flow}_x{constant}_d.mp4"
 DEBUG_VIDEO_PATH = current_file_path + f"/../runs/warn/DEBUG.mp4"
 # Initialize YOLOv8 object detector
 video_info = VideoInfo.from_video_path(SOURCE_VIDEO_PATH)
 model = YOLO(current_file_path + "/../runs/detect/train4/weights/best.pt")
 # Load MiDaS
-midas = torch.hub.load("intel-isl/MiDaS", "DPT_Large")
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-midas.to(device)
-midas.eval()
-midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms")
-transform = midas_transforms.dpt_transform
+optimize = False
+height = video_info.height
+square = False
+model_path = current_file_path + "/midas/weights/dpt_beit_large_512.pt"
+model_type = "dpt_beit_large_512"
+midas, transform, net_w, net_h = load_model(device, model_path, model_type, optimize, height, square)
 
 box_annotator = sv.BoxAnnotator(
     thickness = 2,
@@ -216,7 +219,7 @@ with VideoSink(EXPLAIN_VIDEO_PATH, video_info) as explainable_video:
                         forklift_x2 = box_buffer[forklift_id-1][2]
                         forklift_y1 = box_buffer[forklift_id-1][1]
                         forklift_y2 = box_buffer[forklift_id-1][3]
-                        depth_forklift = compute_median_distance(metric_depth[round(forklift_y1):round(forklift_y2),round(forklift_x1):round(forklift_x2)])
+                        depth_forklift = compute_median_distance(metric_depth[max(round(forklift_y1), 0):round(forklift_y2),max(round(forklift_x1), 0):round(forklift_x2)])
                         cv2.putText(explainable_frame, str(round(depth_forklift, 2)), (round(forklift_x1) + 5, round(forklift_y2) - 10), cv2.FONT_HERSHEY_DUPLEX, 1.0, (0, 255, 0), 1)
 
                         for person_id in detected_person_tracker_id:
@@ -226,7 +229,7 @@ with VideoSink(EXPLAIN_VIDEO_PATH, video_info) as explainable_video:
                             person_y2 = int(box_buffer[person_id-1][3])
                             person_cx = int(current_pos[person_id-1][0])
                             person_cy = int(current_pos[person_id-1][1])
-                            depth_person = compute_median_distance(metric_depth[round(person_y1):round(person_y2),round(person_x1):round(person_x2)])
+                            depth_person = compute_median_distance(metric_depth[max(round(person_y1), 0):round(person_y2),max(round(person_x1), 0):round(person_x2)])
                             cv2.putText(explainable_frame, str(round(depth_person, 2)), (round(person_x1) + 5, round(person_y2) - 10), cv2.FONT_HERSHEY_DUPLEX, 1.0, (0, 255, 0), 1)
                             # if person is not driver:
                             if person_cx < forklift_x1 or\
