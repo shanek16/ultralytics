@@ -323,7 +323,8 @@ with VideoSink(EXPLAIN_VIDEO_PATH, video_info) as explainable_video:
         print(f"Average FPS: {fps:.2f}")
         print(f"Throughput: {throughput_MB_per_s:.2f} MB/s")
 # out.release()
-tegrastats_process.terminate()
+subprocess.run(["sudo", "pkill", "tegrastats"])
+
 # Analyze the tegrastats.log to extract and print/save the required metrics
 with open("/tmp/tegrastats.log", "r") as f:
     lines = f.readlines()
