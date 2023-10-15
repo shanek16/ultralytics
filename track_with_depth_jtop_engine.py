@@ -11,6 +11,14 @@ import torch
 from midas.model_loader import default_models, load_model
 from jtop import jtop
 import threading
+import tensorrt as trt
+import pycuda.driver as cuda
+
+cuda.init()
+# Get the default CUDA device
+cuda_device = cuda.Device(0)
+# Create a context for the device
+context = cuda_device.make_context()
 
 window = 10
 constant = 40
@@ -25,7 +33,8 @@ DEBUG_VIDEO_PATH = current_file_path + f"/../runs/warn/DEBUG.mp4"
 # Initialize YOLOv8 object detector
 video_info = VideoInfo.from_video_path(SOURCE_VIDEO_PATH)
 # model = YOLO(current_file_path + "/../runs/detect/train4/weights/best.pt") # server
-model = YOLO(current_file_path + "/../weights/detect/Lbest.pt") # jetson
+# model = YOLO(current_file_path + "/../weights/detect/Lbest.pt") # jetson
+model = YOLO("/home/shane/Project/weights/detect/engine/Lbest_simplify.engine") # engine
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
 # # Load MiDaS from local
@@ -38,9 +47,18 @@ device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cp
 
 # Load MiDaS from hub
 # midas = torch.hub.load("intel-isl/MiDaS", "DPT_Large")
-midas = torch.hub.load("intel-isl/MiDaS", "DPT_Hybrid")
-midas.to(device)
-midas.eval()
+# midas.to(device)
+# midas.eval()
+
+# Load MiDAS engine
+logger = trt.Logger(trt.Logger.WARNING)
+runtime = trt.Runtime(logger)
+with open("/media/shane/44B4-A589/weights/depth/engine/midas_dpt_large_simplified.engine", "rb") as f:
+# with open("/media/shane/44B4-A589/weights/depth/engine/midas_dpt_hybrid_simplified.engine", "rb") as f:
+    engine_data = f.read()
+engine = runtime.deserialize_cuda_engine(engine_data)
+midas = engine.create_execution_context()
+
 midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms")
 transform = midas_transforms.dpt_transform
 
@@ -167,6 +185,7 @@ def power_monitoring(samples):
 exit_flag = False
 samples = []
 memory_samples = []
+model_names = ['ladder', 'fork_lift', 'person','head']
 
 # Start the power monitoring thread
 monitor_thread = threading.Thread(target=power_monitoring, args=(samples,))
@@ -181,38 +200,56 @@ with VideoSink(WARNING_VIDEO_PATH, video_info) as warning_video:
     frame_count = 0
     total_data_processed_MB = 0
 
+    # Set up buffers
+    input_shape = (1, 3, 384, 672)  
+    output_shape = (1, 1, 384, 672)  
+    h_input = np.empty(input_shape, dtype=np.float32)
+    h_output = np.empty(output_shape, dtype=np.float32)
+    d_input = cuda.mem_alloc(h_input.nbytes)
+    d_output = cuda.mem_alloc(h_output.nbytes)
+    bindings = [int(d_input), int(d_output)]
     for result in model.track(source = SOURCE_VIDEO_PATH, stream = True, agnostic_nms = True, tracker = "botsort.yaml"):
         frame = result.orig_img
+        # print(np.shape(frame)) # (1080, 1920, 3)
         frame_count += 1
         frame_data_MB = frame.shape[0] * frame.shape[1] * frame.shape[2] * 8 / (8 * 1024 * 1024)  # 8 bits per channel
         total_data_processed_MB += frame_data_MB
 
         if result.boxes.id is not None:
-            # print(np.shape(frame)) # (1080, 1920, 3)
             # Depth inference
             img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            # print(np.shape(img)) # (1080, 1920, 3)
-            input_batch = transform(img).to(device)
+            # input_batch = transform(img).to(device)
+            input_batch = transform(img).to(device).cpu().numpy()
             # print(np.shape(input_batch)) # torch.Size([1, 3, 384, 672])
 
-            with torch.no_grad():
-                prediction = midas(input_batch)
-                # print(prediction.shape)  # torch.Size([1, 384, 672])
-                prediction = torch.nn.functional.interpolate(
-                    prediction.unsqueeze(1),
-                    size=img.shape[:2],
-                    mode="bicubic",
-                    align_corners=False,
-                ).squeeze()
-                # print(prediction.shape) # torch.Size([1080, 1920])
+            # Set input data
+            np.copyto(h_input, input_batch)
+            cuda.memcpy_htod(d_input, h_input)
+            
+            # Execute the model
+            midas.execute_v2(bindings=bindings)
+            
+            # Retrieve the output data
+            cuda.memcpy_dtoh(h_output, d_output)
+            prediction = torch.from_numpy(h_output)
+            # print('shape of predition: ', prediction.shape) # torch.Size([1, 1, 384, 672])
+            prediction = torch.nn.functional.interpolate(
+                prediction,
+                size=img.shape[:2],
+                mode="bicubic",
+                align_corners=False,
+            ).squeeze()
+            # print(prediction.shape) # torch.Size([1080, 1920])
             output = prediction.cpu().numpy()
             # print('shape of output: ', np.shape(output))
+
             # # Normalize the output to [0, 255]
             # normalized_output = ((output - output.min()) / (output.max() - output.min()) * 255).astype(np.uint8)
             # # Save the grayscale image
-            # cv2.imwrite('output_image.png', normalized_output)
+            # cv2.imwrite('engine_output_image.png', normalized_output)
             # exit_flag = True
             # monitor_thread.join()
+            # context.pop()
             # exit()
             
             # Get metric depth
@@ -223,7 +260,7 @@ with VideoSink(WARNING_VIDEO_PATH, video_info) as warning_video:
             detections = sv.Detections.from_yolov8(result)
             detections.tracker_id = result.boxes.id.cpu().numpy().astype(int)
             labels = [
-                f'#{tracker_id} {model.model.names[class_id]}{confidence:0.2f}'
+                f'#{tracker_id} {model_names[class_id]}{confidence:0.2f}'
                 for _, _, confidence,  class_id, tracker_id
                 in detections 
             ]
@@ -339,6 +376,7 @@ with VideoSink(WARNING_VIDEO_PATH, video_info) as warning_video:
         # cv2.imshow("Frame", frame)
         # cv2.imshow("Explainable Frame", explainable_frame)
         # cv2.waitKey(1)
+        # cv2.imshow("Warning frame", warning_frame)
         
         # save frames
         # explainable_video.write_frame(explainable_frame)
@@ -371,5 +409,5 @@ print(f"Total power consumed: {total_power_consumed:.2f} mW")
 # Calculate the max and min memory used
 memory_usage_difference = max(memory_samples) - min(memory_samples)
 print(f"Memory usage difference (max - min): {memory_usage_difference:.2f} KB")
-
+context.pop()
 # out.release()
