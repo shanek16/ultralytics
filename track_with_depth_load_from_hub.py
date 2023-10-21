@@ -11,11 +11,11 @@ window = 10
 constant = 40
 flow = 'sector' # arrow
 current_file_path = os.path.dirname(os.path.abspath(__file__))
-file_name = 'ladder1'
-# file_name = 'fork4' # container video
-SOURCE_VIDEO_PATH = current_file_path + f"/../../data/safety/video/{file_name}.mp4"
-EXPLAIN_VIDEO_PATH = current_file_path + f"/../runs/warn/Explain_BoTSORT_{file_name}_window{window}_{flow}_x{constant}_ladder.mp4"
-WARNING_VIDEO_PATH = current_file_path + f"/../runs/warn/Warning_BoTSORT_{file_name}_window{window}_{flow}_x{constant}_ladder.mp4"
+# file_name = 'ladder1'
+file_name = 'Unit9-Turbine-1F-12-230518-1518_C' # container video
+SOURCE_VIDEO_PATH = current_file_path + f"/../../data/safety/video_official/{file_name}.mp4"
+EXPLAIN_VIDEO_PATH = current_file_path + f"/../runs/warn/Explain_BoTSORT_{file_name}_window{window}_{flow}_x{constant}.mp4"
+WARNING_VIDEO_PATH = current_file_path + f"/../runs/warn/Warning_BoTSORT_{file_name}_window{window}_{flow}_x{constant}_THIS.mp4"
 DEBUG_VIDEO_PATH = current_file_path + f"/../runs/warn/DEBUG.mp4"
 # Initialize YOLOv8 object detector
 video_info = VideoInfo.from_video_path(SOURCE_VIDEO_PATH)
@@ -217,7 +217,9 @@ with VideoSink(EXPLAIN_VIDEO_PATH, video_info) as explainable_video:
                         forklift_x2 = box_buffer[forklift_id-1][2]
                         forklift_y1 = box_buffer[forklift_id-1][1]
                         forklift_y2 = box_buffer[forklift_id-1][3]
-                        depth_forklift = compute_median_distance(metric_depth[max(round(forklift_y1), 0):round(forklift_y2),max(round(forklift_x1), 0):round(forklift_x2)])
+                        # depth_forklift = compute_median_distance(metric_depth[max(round(forklift_y1), 0):round(forklift_y2),max(round(forklift_x1), 0):round(forklift_x2)])
+                        depth_forklift = compute_median_distance(output[max(round(forklift_y1), 0):round(forklift_y2),max(round(forklift_x1), 0):round(forklift_x2)])
+                        # print('depth_forklift : ',depth_forklift)
                         cv2.putText(explainable_frame, str(round(depth_forklift, 2)), (round(forklift_x1) + 5, round(forklift_y2) - 10), cv2.FONT_HERSHEY_DUPLEX, 1.0, (0, 255, 0), 1)
 
                         for person_id in detected_person_tracker_id:
@@ -227,7 +229,9 @@ with VideoSink(EXPLAIN_VIDEO_PATH, video_info) as explainable_video:
                             person_y2 = int(box_buffer[person_id-1][3])
                             person_cx = int(current_pos[person_id-1][0])
                             person_cy = int(current_pos[person_id-1][1])
-                            depth_person = compute_median_distance(metric_depth[max(round(person_y1), 0):round(person_y2),max(round(person_x1), 0):round(person_x2)])
+                            # depth_person = compute_median_distance(metric_depth[max(round(person_y1), 0):round(person_y2),max(round(person_x1), 0):round(person_x2)])
+                            depth_person = compute_median_distance(output[max(round(person_y1), 0):round(person_y2),max(round(person_x1), 0):round(person_x2)])
+                            # print('depth_person : ', depth_person)
                             cv2.putText(explainable_frame, str(round(depth_person, 2)), (round(person_x1) + 5, round(person_y2) - 10), cv2.FONT_HERSHEY_DUPLEX, 1.0, (0, 255, 0), 1)
                             # if person is not driver:
                             if person_cx < forklift_x1 or\
@@ -252,7 +256,7 @@ with VideoSink(EXPLAIN_VIDEO_PATH, video_info) as explainable_video:
                                 y2 = max(detections.xyxy[index_forklift_id][3], detections.xyxy[index_person_id][3])
 
                                 # Check for overlapping sectors
-                                if abs(depth_forklift - depth_person) < 200.0:
+                                if abs(depth_forklift - depth_person) < 5.0:
                                     emergency_mask = cv2.bitwise_and(forklift_red_mask, person_red_mask)
                                     danger_mask = cv2.bitwise_and(forklift_orange_mask, person_orange_mask)
                                     warning_mask = cv2.bitwise_and(forklift_yellow_mask, person_yellow_mask)

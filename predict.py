@@ -1,7 +1,8 @@
 from ultralytics import YOLO
 
 model = YOLO("./runs/detect/train2/weights/best.pt")
-source = '../../data/safety/video/forklift_accident1.mp4'
+# source = '../../data/safety/video/forklift_accident1.mp4'
+source = '../../data/safety/video/ladder_short.mp4'
 name = source.split('/')[-1][:-4]
 
 results = model.predict(

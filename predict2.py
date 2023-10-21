@@ -5,12 +5,14 @@ from yolov8.models.experimental import attempt_load
 from yolov8.utils.datasets import LoadStreams
 
 # Load YOLOv8 model
-weights = './runs/detect/train2/weights/best.pt'
+# weights = './runs/detect/train2/weights/best.pt'
+weights = '/home/swkim/Project/yolov8_tracking/runs/detect/train3/weights/best.engine'
 device = select_device('')
 model = attempt_load(weights, map_location=device)
 
 # Load input video
-source = '../../data/safety/video/forklift_accident1.mp4'
+# source = '../../data/safety/video/forklift_accident1.mp4'
+source = '../../data/safety/video/ladder_short.mp4'
 cap = cv2.VideoCapture(source)
 
 # Define output video codec and fps
