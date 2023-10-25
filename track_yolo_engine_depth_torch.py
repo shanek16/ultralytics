@@ -7,10 +7,6 @@ import supervision as sv
 from supervision.video  import VideoSink, VideoInfo
 from sector import risk_area
 import torch
-from midas.model_loader import default_models, load_model
-# from jtop import jtop # need to adjust this to htop..
-# import threading
-import onnxruntime as ort
 
 window = 10
 constant = 40
@@ -32,28 +28,11 @@ WARNING_VIDEO_PATH = current_file_path + f"/runs/warn/Warning_BoTSORT_{file_name
 DEBUG_VIDEO_PATH = current_file_path + f"/runs/warn/DEBUG.mp4"
 # Initialize YOLOv8 object detector
 video_info = VideoInfo.from_video_path(SOURCE_VIDEO_PATH)
-# model = YOLO(current_file_path + "/../runs/detect/train4/weights/best.pt") # server
-# model = YOLO(current_file_path + "/../weights/detect/Lbest.pt") # jetson
-# model = YOLO("/home/shane/Project/weights/detect/engine/Lbest_simplify.engine") # jetson
-# model = YOLO("/home/swkim/Project/yolov8_tracking/runs/detect/train3/weights/best.engine") # server
-model = YOLO(current_file_path + "/../weights/detect/YOLOL.engine")
+model = YOLO(current_file_path + "/../weights/detect/YOLOL.engine")# Load MiDaS
+midas = torch.hub.load("intel-isl/MiDaS", "DPT_Large")
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-
-
-# Load MiDaS from hub
-# midas = torch.hub.load("intel-isl/MiDaS", "DPT_Large")
-# midas.to(device)
-# midas.eval()
-
-# Load the ONNX model
-# Create session options
-options = ort.SessionOptions()
-# Set the number of threads
-options.inter_op_num_threads = 1
-options.intra_op_num_threads = 2
-# session = ort.InferenceSession("/media/shane/44B4-A589/weights/depth/onnx/midas_dpt_large_simplified.onnx", providers=['CUDAExecutionProvider'], sess_options=options)
-# session = ort.InferenceSession("/media/shane/44B4-A589/weights/depth/onnx/midas_dpt_hybrid_simplified.onnx", providers=['CUDAExecutionProvider'], sess_options=options)
-session = ort.InferenceSession(current_file_path + "/../weights/depth/midas_dpt_hybrid_simplified.onnx", providers=['CUDAExecutionProvider'], sess_options=options)
+midas.to(device)
+midas.eval()
 midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms")
 transform = midas_transforms.dpt_transform
 
@@ -71,7 +50,6 @@ mv_buffer = np.full(300, fill_value=None, dtype=object) # seems like mean veloci
 height = video_info.height
 width = video_info.width
 white_img = 255*np.ones((height, width, 3), dtype=np.uint8)
-
 model_names = ['ladder', 'fork_lift', 'person','head']
 
 def L2(p1,p2):
@@ -149,79 +127,28 @@ def compute_median_distance(depth_map):
     sampled_pixels = np.random.choice(cropped_image.ravel(), size=100)
 
     return np.median(sampled_pixels)
-
-
-# def power_monitoring(samples):
-#     with jtop() as jetson:
-#         while not exit_flag:
-#             power = jetson.power['tot']['power']
-#             samples.append(power)
-#             total_memory = jetson.memory['RAM']['used'] + jetson.memory['SWAP']['used']
-#             memory_samples.append(total_memory)
-#             time.sleep(1)  # sample every second
-
-# exit_flag = False
-# samples = []
-# memory_samples = []
-
-# # Start the power monitoring thread
-# monitor_thread = threading.Thread(target=power_monitoring, args=(samples,))
-# monitor_thread.start()
-
 # out = cv2.VideoWriter(DEBUG_VIDEO_PATH, cv2.VideoWriter_fourcc(*'mp4v'), video_info.fps, (2 * width, 2 * height))
 # with VideoSink(EXPLAIN_VIDEO_PATH, video_info) as explainable_video:
 with VideoSink(WARNING_VIDEO_PATH, video_info) as warning_video:
     i = 0
-    # FPS and Throughput measurement
     start_time = time.time()
     frame_count = 0
-    # total_data_processed_MB = 0
-
     for result in model.track(source = SOURCE_VIDEO_PATH, stream = True, agnostic_nms = True, tracker = "botsort.yaml"):
         frame = result.orig_img
         frame_count += 1
-        # frame_data_MB = frame.shape[0] * frame.shape[1] * frame.shape[2] * 8 / (8 * 1024 * 1024)  # 8 bits per channel
-        # total_data_processed_MB += frame_data_MB
-
         if result.boxes.id is not None:
-            # print(np.shape(frame)) # (1080, 1920, 3)
             # Depth inference
             img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            # print(np.shape(img)) # (1080, 1920, 3)
             input_batch = transform(img).to(device)
-            # input_batch = transform(img).to(device).cpu().numpy()
-            # print(np.shape(input_batch)) # torch.Size([1, 3, 384, 672])
-            # Assuming input_batch is a NumPy array
-            inputs = {session.get_inputs()[0].name: input_batch.cpu().numpy()}
-
-            # Run the model
-            # t_start = time.time()
             with torch.no_grad():
-                prediction = session.run(None, inputs)[0]  # get the first output
-            # print('prediction shape: ', prediction.shape)  # torch.Size([1, 384, 672])
-            # Rescale the prediction to the original image size
-            prediction = torch.nn.functional.interpolate(
-                torch.from_numpy(prediction).unsqueeze(1),
-                size=img.shape[:2],
-                mode="bicubic",
-                align_corners=False,
-            ).squeeze()
-            # print(prediction.shape) # torch.Size([1080, 1920])
-
+                prediction = midas(input_batch)
+                prediction = torch.nn.functional.interpolate(
+                    prediction.unsqueeze(1),
+                    size=img.shape[:2],
+                    mode="bicubic",
+                    align_corners=False,
+                ).squeeze()
             output = prediction.cpu().numpy()
-            
-            # t_end = time.time()
-            # print("depth estimation inference time : ", t_end - t_start)
-
-            # print('shape of output: ', np.shape(output)) # (1080, 1920)
-            # Normalize the output to [0, 255]
-            # normalized_output = ((output - output.min()) / (output.max() - output.min()) * 255).astype(np.uint8)
-            # Save the grayscale image
-            # cv2.imwrite('hybrid_onnx_output_image.png', normalized_output)
-            # exit_flag = True
-            # monitor_thread.join()
-            # exit()
-
             # Detection & Tracking inference
             detections = sv.Detections.from_yolov8(result)
             detections.tracker_id = result.boxes.id.cpu().numpy().astype(int)
@@ -340,13 +267,10 @@ with VideoSink(WARNING_VIDEO_PATH, video_info) as warning_video:
 
         # Display frame with tracks and count
         # cv2.imshow("Frame", frame)
-        # cv2.imshow("Explainable Frame", explainable_frame)
-        
-        # save frames
         # explainable_video.write_frame(explainable_frame)
         warning_video.write_frame(warning_frame)
 
-        # create an empty canvas with twice the width and height of the frames(to see 4 frames in one canvas: for debugging)
+        # create an empty canvas with twice the width and height of the frames
         # canvas = np.zeros((2 * height, 2 * width, 3), dtype=np.uint8)
 
         # place each frame in the appropriate quadrant of the canvas
@@ -357,22 +281,9 @@ with VideoSink(WARNING_VIDEO_PATH, video_info) as warning_video:
 
         # write the canvas to the output video file
         # out.write(canvas)
-    # Calculate FPS and Throughput
     end_time = time.time()
     elapsed_time = end_time - start_time
     fps = frame_count / elapsed_time
     # throughput_MB_per_s = total_data_processed_MB / elapsed_time
     print(f"Average FPS: {fps:.2f}")
-    # print(f"Throughput: {throughput_MB_per_s:.2f} MB/s")
-# exit_flag = True
-# monitor_thread.join()
-
-# # Calculate the total power consumed
-# total_power_consumed = sum(samples) - samples[0]  # subtracting the initial power reading
-# print(f"Total power consumed: {total_power_consumed:.2f} mW")
-# # Calculate the max and min memory used
-# memory_usage_difference = max(memory_samples) - min(memory_samples)
-# print(f"Memory usage difference (max - min): {memory_usage_difference:.2f} KB")
-
 # out.release()
-

@@ -9,8 +9,8 @@ from supervision.video  import VideoSink, VideoInfo
 from sector import risk_area
 import torch
 from midas.model_loader import default_models, load_model
-from jtop import jtop
-import threading
+# from jtop import jtop
+# import threading
 import tensorrt as trt
 import pycuda.driver as cuda
 
@@ -24,17 +24,27 @@ window = 10
 constant = 40
 flow = 'sector' # arrow
 current_file_path = os.path.dirname(os.path.abspath(__file__))
-file_name = 'fork_container_1min'
-# SOURCE_VIDEO_PATH = current_file_path + f"/../../data/safety/video/{file_name}.mp4" # server
-SOURCE_VIDEO_PATH = current_file_path + f"/../../../../media/shane/44B4-A589/video/{file_name}.mp4" #jetson
-EXPLAIN_VIDEO_PATH = current_file_path + f"/../runs/warn/Explain_BoTSORT_{file_name}_window{window}_{flow}_x{constant}.mp4"
-WARNING_VIDEO_PATH = current_file_path + f"/../runs/warn/Warning_BoTSORT_{file_name}_window{window}_{flow}_x{constant}.mp4"
-DEBUG_VIDEO_PATH = current_file_path + f"/../runs/warn/DEBUG.mp4"
+file_name = 'Unit9-Turbine-1F-12-230518-1518_C'
+# file_name = 'fork_container_1min'
+# # SOURCE_VIDEO_PATH = current_file_path + f"/../../data/safety/video/{file_name}.mp4" # server
+# SOURCE_VIDEO_PATH = current_file_path + f"/../../data/safety/video_official/{file_name}.mp4" # server
+# # SOURCE_VIDEO_PATH = current_file_path + f"/../../../../media/shane/44B4-A589/video/{file_name}.mp4" #jetson
+# EXPLAIN_VIDEO_PATH = current_file_path + f"/../runs/warn/Explain_BoTSORT_{file_name}_window{window}_{flow}_x{constant}.mp4"
+# WARNING_VIDEO_PATH = current_file_path + f"/../runs/warn/Warning_BoTSORT_{file_name}_window{window}_{flow}_x{constant}.mp4"
+# DEBUG_VIDEO_PATH = current_file_path + f"/../runs/warn/DEBUG.mp4"
+
+# Docker
+SOURCE_VIDEO_PATH = current_file_path + f"/../data/safety/video_official/{file_name}.mp4" # server
+EXPLAIN_VIDEO_PATH = current_file_path + f"/runs/warn/Explain_BoTSORT_{file_name}_window{window}_{flow}_x{constant}.mp4"
+WARNING_VIDEO_PATH = current_file_path + f"/runs/warn/Warning_BoTSORT_{file_name}_window{window}_{flow}_x{constant}.mp4"
+DEBUG_VIDEO_PATH = current_file_path + f"/runs/warn/DEBUG.mp4"
+
 # Initialize YOLOv8 object detector
 video_info = VideoInfo.from_video_path(SOURCE_VIDEO_PATH)
 # model = YOLO(current_file_path + "/../runs/detect/train4/weights/best.pt") # server
 # model = YOLO(current_file_path + "/../weights/detect/Lbest.pt") # jetson
-model = YOLO("/home/shane/Project/weights/detect/engine/Lbest_simplify.engine") # engine
+# model = YOLO("/home/shane/Project/weights/detect/engine/Lbest_simplify.engine") # jetson
+model = YOLO("/home/swkim/Project/yolov8_tracking/runs/detect/train3/weights/best.engine") # server
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
 # # Load MiDaS from local
@@ -51,13 +61,18 @@ device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cp
 # midas.eval()
 
 # Load MiDAS engine
-logger = trt.Logger(trt.Logger.WARNING)
+logger = trt.Logger(trt.Logger.WARNING) #VERBOSE
 runtime = trt.Runtime(logger)
-with open("/media/shane/44B4-A589/weights/depth/engine/midas_dpt_large_simplified.engine", "rb") as f:
+# with open("/media/shane/44B4-A589/weights/depth/engine/midas_dpt_large_simplified.engine", "rb") as f:
 # with open("/media/shane/44B4-A589/weights/depth/engine/midas_dpt_hybrid_simplified.engine", "rb") as f:
+with open("/home/swkim/Project/weights/depth/engine/midas_dpt_hybrid_simplified.engine", "rb") as f:
     engine_data = f.read()
 engine = runtime.deserialize_cuda_engine(engine_data)
-midas = engine.create_execution_context()
+try:
+    midas = engine.create_execution_context()
+except:
+    context.pop()
+    exit()
 
 midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms")
 transform = midas_transforms.dpt_transform
@@ -76,6 +91,7 @@ mv_buffer = np.full(300, fill_value=None, dtype=object) # seems like mean veloci
 height = video_info.height
 width = video_info.width
 white_img = 255*np.ones((height, width, 3), dtype=np.uint8)
+model_names = ['ladder', 'fork_lift', 'person','head']
 
 def L2(p1,p2):
     if isinstance(p1, np.ndarray) and isinstance(p2, np.ndarray):
@@ -138,58 +154,38 @@ def warning(frame, xyxy, color=(0, 0, 255), alpha = 0.2):
     frame = cv2.addWeighted(overlay, alpha, frame, 1-alpha, 0)
     return frame
 
-def compute_parameter(p1, p2, d1, d2):
-    a = (d1 - d2) / (1 / p1 - 1 / p2)
-    b = d1 - a / p1
-    return a, b
-
 def compute_median_distance(depth_map):
-    """
-    Use Otsu's thresholding to distinguish the background, compute the median distance 
-    of the non-background pixels, and save the visualized result.
+    h, w = depth_map.shape
+    center_x, center_y = w // 2, h // 2
 
-    Parameters:
-        depth_map (numpy array): 2D depth map.
-        save_path (str): Path to save the visualized result.
+    # Crop center (50%)
+    cropped_h, cropped_w = h // 2, w // 2
+    start_x, start_y = center_x - cropped_w // 2, center_y - cropped_h // 2
 
-    Returns:
-        median_distance (float): Median distance of the non-background pixels.
-    """
-    
-    # Ensure the depth_map is in 8-bit format for Otsu's method in cv2
-    normalized_map = ((depth_map - depth_map.min()) * (255.0 / (depth_map.max() - depth_map.min()))).astype(np.uint8)
-    
-    # Compute Otsu's threshold value
-    _, otsu_binary = cv2.threshold(normalized_map, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    
-    # Calculate the threshold value in the original depth map scale
-    threshold_value = depth_map.min() + (depth_map.max() - depth_map.min()) * (_ / 255.0)
-    
-    # Mask non-background pixels
-    non_background_pixels = depth_map[depth_map < threshold_value]
+    cropped_image = depth_map[start_y:start_y+cropped_h, start_x:start_x+cropped_w]
 
-    # Compute the median of the non-background pixels
-    median_distance = np.median(non_background_pixels)
-    
-    return median_distance
+    # Sample 100 pixels
+    sampled_pixels = np.random.choice(cropped_image.ravel(), size=100)
 
-def power_monitoring(samples):
-    with jtop() as jetson:
-        while not exit_flag:
-            power = jetson.power['tot']['power']
-            samples.append(power)
-            total_memory = jetson.memory['RAM']['used'] + jetson.memory['SWAP']['used']
-            memory_samples.append(total_memory)
-            time.sleep(1)  # sample every second
+    return np.median(sampled_pixels)
 
-exit_flag = False
-samples = []
-memory_samples = []
-model_names = ['ladder', 'fork_lift', 'person','head']
 
-# Start the power monitoring thread
-monitor_thread = threading.Thread(target=power_monitoring, args=(samples,))
-monitor_thread.start()
+# def power_monitoring(samples):
+#     with jtop() as jetson:
+#         while not exit_flag:
+#             power = jetson.power['tot']['power']
+#             samples.append(power)
+#             total_memory = jetson.memory['RAM']['used'] + jetson.memory['SWAP']['used']
+#             memory_samples.append(total_memory)
+#             time.sleep(1)  # sample every second
+
+# exit_flag = False
+# samples = []
+# memory_samples = []
+
+# # Start the power monitoring thread
+# monitor_thread = threading.Thread(target=power_monitoring, args=(samples,))
+# monitor_thread.start()
 
 # out = cv2.VideoWriter(DEBUG_VIDEO_PATH, cv2.VideoWriter_fourcc(*'mp4v'), video_info.fps, (2 * width, 2 * height))
 # with VideoSink(EXPLAIN_VIDEO_PATH, video_info) as explainable_video:
@@ -198,7 +194,7 @@ with VideoSink(WARNING_VIDEO_PATH, video_info) as warning_video:
     # FPS and Throughput measurement
     start_time = time.time()
     frame_count = 0
-    total_data_processed_MB = 0
+    # total_data_processed_MB = 0
 
     # Set up buffers
     input_shape = (1, 3, 384, 672)  
@@ -212,8 +208,8 @@ with VideoSink(WARNING_VIDEO_PATH, video_info) as warning_video:
         frame = result.orig_img
         # print(np.shape(frame)) # (1080, 1920, 3)
         frame_count += 1
-        frame_data_MB = frame.shape[0] * frame.shape[1] * frame.shape[2] * 8 / (8 * 1024 * 1024)  # 8 bits per channel
-        total_data_processed_MB += frame_data_MB
+        # frame_data_MB = frame.shape[0] * frame.shape[1] * frame.shape[2] * 8 / (8 * 1024 * 1024)  # 8 bits per channel
+        # total_data_processed_MB += frame_data_MB
 
         if result.boxes.id is not None:
             # Depth inference
@@ -241,21 +237,20 @@ with VideoSink(WARNING_VIDEO_PATH, video_info) as warning_video:
             ).squeeze()
             # print(prediction.shape) # torch.Size([1080, 1920])
             output = prediction.cpu().numpy()
+            # t_end = time.time()
+            # print("depth estimation inference time : ", t_end - t_start)
+
             # print('shape of output: ', np.shape(output))
 
-            # # Normalize the output to [0, 255]
+            # Normalize the output to [0, 255]
             # normalized_output = ((output - output.min()) / (output.max() - output.min()) * 255).astype(np.uint8)
-            # # Save the grayscale image
+            # Save the grayscale image
             # cv2.imwrite('engine_output_image.png', normalized_output)
             # exit_flag = True
             # monitor_thread.join()
             # context.pop()
             # exit()
             
-            # Get metric depth
-            a, b = compute_parameter(output[67, 200], output[700, 800], 1000, 200)
-            metric_depth = a / output + b
-
             # Detection & Tracking inference
             detections = sv.Detections.from_yolov8(result)
             detections.tracker_id = result.boxes.id.cpu().numpy().astype(int)
@@ -305,7 +300,7 @@ with VideoSink(WARNING_VIDEO_PATH, video_info) as warning_video:
                     forklift_x2 = box_buffer[forklift_id-1][2]
                     forklift_y1 = box_buffer[forklift_id-1][1]
                     forklift_y2 = box_buffer[forklift_id-1][3]
-                    depth_forklift = compute_median_distance(metric_depth[max(round(forklift_y1), 0):round(forklift_y2),max(round(forklift_x1), 0):round(forklift_x2)])
+                    depth_forklift = compute_median_distance(output[max(round(forklift_y1), 0):round(forklift_y2),max(round(forklift_x1), 0):round(forklift_x2)])
                     # cv2.putText(explainable_frame, str(round(depth_forklift, 2)), (round(forklift_x1) + 5, round(forklift_y2) - 10), cv2.FONT_HERSHEY_DUPLEX, 1.0, (0, 255, 0), 1)
 
                     for person_id in detected_person_tracker_id:
@@ -315,7 +310,7 @@ with VideoSink(WARNING_VIDEO_PATH, video_info) as warning_video:
                         person_y2 = int(box_buffer[person_id-1][3])
                         person_cx = int(current_pos[person_id-1][0])
                         person_cy = int(current_pos[person_id-1][1])
-                        depth_person = compute_median_distance(metric_depth[max(round(person_y1), 0):round(person_y2),max(round(person_x1), 0):round(person_x2)])
+                        depth_person = compute_median_distance(output[max(round(person_y1), 0):round(person_y2),max(round(person_x1), 0):round(person_x2)])
                         # cv2.putText(explainable_frame, str(round(depth_person, 2)), (round(person_x1) + 5, round(person_y2) - 10), cv2.FONT_HERSHEY_DUPLEX, 1.0, (0, 255, 0), 1)
                         # if person is not driver:
                         if person_cx < forklift_x1 or\
@@ -397,17 +392,17 @@ with VideoSink(WARNING_VIDEO_PATH, video_info) as warning_video:
     end_time = time.time()
     elapsed_time = end_time - start_time
     fps = frame_count / elapsed_time
-    throughput_MB_per_s = total_data_processed_MB / elapsed_time
+    # throughput_MB_per_s = total_data_processed_MB / elapsed_time
     print(f"Average FPS: {fps:.2f}")
-    print(f"Throughput: {throughput_MB_per_s:.2f} MB/s")
-exit_flag = True
-monitor_thread.join()
+    # print(f"Throughput: {throughput_MB_per_s:.2f} MB/s")
+# exit_flag = True
+# monitor_thread.join()
 
-# Calculate the total power consumed
-total_power_consumed = sum(samples) - samples[0]  # subtracting the initial power reading
-print(f"Total power consumed: {total_power_consumed:.2f} mW")
-# Calculate the max and min memory used
-memory_usage_difference = max(memory_samples) - min(memory_samples)
-print(f"Memory usage difference (max - min): {memory_usage_difference:.2f} KB")
+# # Calculate the total power consumed
+# total_power_consumed = sum(samples) - samples[0]  # subtracting the initial power reading
+# print(f"Total power consumed: {total_power_consumed:.2f} mW")
+# # Calculate the max and min memory used
+# memory_usage_difference = max(memory_samples) - min(memory_samples)
+# print(f"Memory usage difference (max - min): {memory_usage_difference:.2f} KB")
 context.pop()
 # out.release()
