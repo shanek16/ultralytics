@@ -7,4 +7,4 @@ weights = '../weights/detect/YOLOL.pt' # Lbest.pt
 model = YOLO(weights)  # load a custom trained
 
 # Export the model
-model.export(format='engine', imgsz=640, simplify=True, half=False, device='0,1,2,3')
+model.export(format='engine', imgsz=640, simplify=True, half=False, device='0')

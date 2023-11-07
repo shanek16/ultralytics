@@ -18,7 +18,7 @@ file_name = 'fork4'
 # DEBUG_VIDEO_PATH = current_file_path + f"/../runs/warn/DEBUG_0906.mp4"
 
 # Docker
-SOURCE_VIDEO_PATH = current_file_path + f"/../data/safety/video_official/{file_name}.mp4"
+SOURCE_VIDEO_PATH = current_file_path + f"/../data/safety/video/{file_name}.mp4"
 EXPLAIN_VIDEO_PATH = current_file_path + f"/../result_video/Explain_BoTSORT_{file_name}_window{window}_{flow}_x{constant}_before.mp4"
 WARNING_VIDEO_PATH = current_file_path + f"/../result_video/Warning_BoTSORT_{file_name}_window{window}_{flow}_x{constant}_before.mp4"
 DEBUG_VIDEO_PATH = current_file_path + f"/../result_video/DEBUG_0906.mp4"

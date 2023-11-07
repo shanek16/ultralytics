@@ -16,7 +16,10 @@ window = 10
 constant = 40
 flow = 'sector' # arrow
 current_file_path = os.path.dirname(os.path.abspath(__file__))
-file_name = 'Unit9-Turbine-1F-12-230518-1518_C'
+file_name = 'Unit9-Turbine-1F-12-230518-1513_A'
+# file_name = 'Unit9-Turbine-1F-12-230518-1517_B'
+# file_name = 'Unit9-Turbine-1F-12-230518-1518_C'
+# file_name = 'Unit9-Turbine-1F-13-230518-1512_D'
 # file_name = 'fork_container_1min'
 # # SOURCE_VIDEO_PATH = current_file_path + f"/../../data/safety/video/{file_name}.mp4" # server
 # SOURCE_VIDEO_PATH = current_file_path + f"/../../data/safety/video_official/{file_name}.mp4" # server
@@ -27,8 +30,8 @@ file_name = 'Unit9-Turbine-1F-12-230518-1518_C'
 
 # Docker
 SOURCE_VIDEO_PATH = current_file_path + f"/../data/safety/video_official/{file_name}.mp4" # server
-EXPLAIN_VIDEO_PATH = current_file_path + f"/runs/warn/Explain_BoTSORT_{file_name}_window{window}_{flow}_x{constant}.mp4"
-WARNING_VIDEO_PATH = current_file_path + f"/runs/warn/Warning_BoTSORT_{file_name}_window{window}_{flow}_x{constant}.mp4"
+EXPLAIN_VIDEO_PATH = current_file_path + f"/runs/warn/Explain_onnx_{file_name}.mp4"
+WARNING_VIDEO_PATH = current_file_path + f"/runs/warn/Warning_onnx_{file_name}.mp4"
 DEBUG_VIDEO_PATH = current_file_path + f"/runs/warn/DEBUG.mp4"
 # Initialize YOLOv8 object detector
 video_info = VideoInfo.from_video_path(SOURCE_VIDEO_PATH)
@@ -39,20 +42,15 @@ video_info = VideoInfo.from_video_path(SOURCE_VIDEO_PATH)
 model = YOLO(current_file_path + "/../weights/detect/YOLOL.engine")
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
-
-# Load MiDaS from hub
-# midas = torch.hub.load("intel-isl/MiDaS", "DPT_Large")
-# midas.to(device)
-# midas.eval()
-
 # Load the ONNX model
 # Create session options
 options = ort.SessionOptions()
 # Set the number of threads
 options.inter_op_num_threads = 1
 options.intra_op_num_threads = 2
-# session = ort.InferenceSession("/media/shane/44B4-A589/weights/depth/onnx/midas_dpt_large_simplified.onnx", providers=['CUDAExecutionProvider'], sess_options=options)
+# jetson
 # session = ort.InferenceSession("/media/shane/44B4-A589/weights/depth/onnx/midas_dpt_hybrid_simplified.onnx", providers=['CUDAExecutionProvider'], sess_options=options)
+# ssw
 session = ort.InferenceSession(current_file_path + "/../weights/depth/midas_dpt_hybrid_simplified.onnx", providers=['CUDAExecutionProvider'], sess_options=options)
 midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms")
 transform = midas_transforms.dpt_transform
