@@ -10,7 +10,7 @@ window = 10
 constant = 40
 flow = 'sector' # arrow
 current_file_path = os.path.dirname(os.path.abspath(__file__))
-file_name = 'fork4'
+file_name = 'container_1min'
 # Local
 # SOURCE_VIDEO_PATH = current_file_path + f"/../../data/safety/video/{file_name}.mp4"
 # EXPLAIN_VIDEO_PATH = current_file_path + f"/../runs/warn/Explain_BoTSORT_{file_name}_window{window}_{flow}_x{constant}_before.mp4"
@@ -19,9 +19,9 @@ file_name = 'fork4'
 
 # Docker
 SOURCE_VIDEO_PATH = current_file_path + f"/../data/safety/video/{file_name}.mp4"
-EXPLAIN_VIDEO_PATH = current_file_path + f"/../result_video/Explain_BoTSORT_{file_name}_window{window}_{flow}_x{constant}_before.mp4"
-WARNING_VIDEO_PATH = current_file_path + f"/../result_video/Warning_BoTSORT_{file_name}_window{window}_{flow}_x{constant}_before.mp4"
-DEBUG_VIDEO_PATH = current_file_path + f"/../result_video/DEBUG_0906.mp4"
+EXPLAIN_VIDEO_PATH = current_file_path + f"/runs/warn/Explain_xdepth_BoTSORT_{file_name}_window{window}_{flow}_x{constant}_before.mp4"
+WARNING_VIDEO_PATH = current_file_path + f"/runs/warn/Warning_xdepth_BoTSORT_{file_name}_window{window}_{flow}_x{constant}_before.mp4"
+DEBUG_VIDEO_PATH = current_file_path + f"/runs/warn/DEBUG_xdepth_{file_name}.mp4"
 # Initialize YOLOv8 object detector
 video_info = VideoInfo.from_video_path(SOURCE_VIDEO_PATH)
 # model = YOLO(current_file_path + "/../weights/detect/YOLOL.pt")
@@ -112,6 +112,8 @@ with VideoSink(EXPLAIN_VIDEO_PATH, video_info) as explainable_video:
         for result in model.track(source = SOURCE_VIDEO_PATH, stream = True, agnostic_nms = True, tracker = "botsort.yaml"):
             frame = result.orig_img
             detections = sv.Detections.from_yolov8(result)
+            forklift_yellow_mask = np.zeros((height, width), dtype=np.uint8)
+            person_yellow_mask = np.zeros((height, width), dtype=np.uint8)
             if result.boxes.id is not None:
                 detections.tracker_id = result.boxes.id.cpu().numpy().astype(int)
                 labels = [
@@ -123,8 +125,6 @@ with VideoSink(EXPLAIN_VIDEO_PATH, video_info) as explainable_video:
                 frame = box_annotator.annotate(scene = frame, detections = detections, labels = labels)
                 explainable_frame = frame.copy()
                 warning_frame = frame.copy()
-                forklift_yellow_mask = np.zeros((height, width), dtype=np.uint8)
-                person_yellow_mask = np.zeros((height, width), dtype=np.uint8)
                 # Calculate velocities and directions of tracked objects
                 if prev_tracks is not None:
                     # Get position of object in current frame
@@ -219,6 +219,9 @@ with VideoSink(EXPLAIN_VIDEO_PATH, video_info) as explainable_video:
                         pos_buffer[i][tracker_id-1] = np.array([cx,cy]) # previous row
                         prev_tracks = detections
                 i=i+1
+            else:
+                explainable_frame = frame.copy()
+                warning_frame = frame.copy()
 
             # Display frame with tracks and count
             # cv2.imshow("Frame", frame)

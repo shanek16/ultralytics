@@ -32,7 +32,7 @@ file_name = 'Unit9-Turbine-1F-12-230518-1513_A'
 SOURCE_VIDEO_PATH = current_file_path + f"/../data/safety/video_official/{file_name}.mp4" # server
 EXPLAIN_VIDEO_PATH = current_file_path + f"/runs/warn/Explain_onnx_{file_name}.mp4"
 WARNING_VIDEO_PATH = current_file_path + f"/runs/warn/Warning_onnx_{file_name}.mp4"
-DEBUG_VIDEO_PATH = current_file_path + f"/runs/warn/DEBUG.mp4"
+DEBUG_VIDEO_PATH = current_file_path + f"/runs/warn/DEBUG_onnx_{file_name}.mp4"
 # Initialize YOLOv8 object detector
 video_info = VideoInfo.from_video_path(SOURCE_VIDEO_PATH)
 # model = YOLO(current_file_path + "/../runs/detect/train4/weights/best.pt") # server
