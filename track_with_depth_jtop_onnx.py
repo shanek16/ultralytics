@@ -29,9 +29,7 @@ file_name = 'container_1min'
 # DEBUG_VIDEO_PATH = current_file_path + f"/../runs/warn/DEBUG.mp4"
 
 # Docker
-# SOURCE_VIDEO_PATH = current_file_path + f"/../data/safety/video/{file_name}.mp4" # server
-SOURCE_VIDEO_PATH = "container_1min.mp4"
-
+SOURCE_VIDEO_PATH = current_file_path + f"/../data/safety/video/{file_name}.mp4" # server
 EXPLAIN_VIDEO_PATH = current_file_path + f"/runs/warn/Explain_onnx_{file_name}.mp4"
 WARNING_VIDEO_PATH = current_file_path + f"/runs/warn/Warning_onnx_{file_name}.mp4"
 DEBUG_VIDEO_PATH = current_file_path + f"/runs/warn/DEBUG_onnx_{file_name}.mp4"

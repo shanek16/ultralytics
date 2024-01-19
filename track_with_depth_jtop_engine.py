@@ -8,7 +8,7 @@ import supervision as sv
 from supervision.video  import VideoSink, VideoInfo
 from sector import risk_area
 import torch
-    torch.cuda.set_device(0)
+# torch.cuda.set_device(0)
 
 from midas.model_loader import default_models, load_model
 # from jtop import jtop
@@ -46,7 +46,7 @@ file_name = args.input
 # DEBUG_VIDEO_PATH = current_file_path + f"/../runs/warn/DEBUG.mp4"
 
 # Docker
-SOURCE_VIDEO_PATH = current_file_path + f"/../data/safety/video/{args.input}.mp4" # server
+SOURCE_VIDEO_PATH = current_file_path + f"/../data/safety/video/{file_name}.mp4" # server
 EXPLAIN_VIDEO_PATH = current_file_path + f"/runs/warn/Explain_engine_{file_name}.mp4"
 WARNING_VIDEO_PATH = current_file_path + f"/runs/warn/Warning_engine_{file_name}.mp4"
 DEBUG_VIDEO_PATH = current_file_path + f"/runs/warn/DEBUG_engine_{file_name}.mp4"
