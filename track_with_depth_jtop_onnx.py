@@ -16,11 +16,11 @@ window = 10
 constant = 40
 flow = 'sector' # arrow
 current_file_path = os.path.dirname(os.path.abspath(__file__))
-file_name = 'Unit9-Turbine-1F-12-230518-1513_A'
+# file_name = 'Unit9-Turbine-1F-12-230518-1513_A'
 # file_name = 'Unit9-Turbine-1F-12-230518-1517_B'
 # file_name = 'Unit9-Turbine-1F-12-230518-1518_C'
 # file_name = 'Unit9-Turbine-1F-13-230518-1512_D'
-# file_name = 'fork_container_1min'
+file_name = 'container_1min'
 # # SOURCE_VIDEO_PATH = current_file_path + f"/../../data/safety/video/{file_name}.mp4" # server
 # SOURCE_VIDEO_PATH = current_file_path + f"/../../data/safety/video_official/{file_name}.mp4" # server
 # # SOURCE_VIDEO_PATH = current_file_path + f"/../../../../media/shane/44B4-A589/video/{file_name}.mp4" #jetson
@@ -29,7 +29,9 @@ file_name = 'Unit9-Turbine-1F-12-230518-1513_A'
 # DEBUG_VIDEO_PATH = current_file_path + f"/../runs/warn/DEBUG.mp4"
 
 # Docker
-SOURCE_VIDEO_PATH = current_file_path + f"/../data/safety/video_official/{file_name}.mp4" # server
+# SOURCE_VIDEO_PATH = current_file_path + f"/../data/safety/video/{file_name}.mp4" # server
+SOURCE_VIDEO_PATH = "container_1min.mp4"
+
 EXPLAIN_VIDEO_PATH = current_file_path + f"/runs/warn/Explain_onnx_{file_name}.mp4"
 WARNING_VIDEO_PATH = current_file_path + f"/runs/warn/Warning_onnx_{file_name}.mp4"
 DEBUG_VIDEO_PATH = current_file_path + f"/runs/warn/DEBUG_onnx_{file_name}.mp4"

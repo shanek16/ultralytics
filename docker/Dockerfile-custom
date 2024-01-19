@@ -12,9 +12,10 @@ RUN apt-get update && \
     apt-get install -y \
     ffmpeg \
     libsm6 \
-    libxext6 \
-    # rm -rf /var/lib/apt/lists/* \
-    rm -r /opt/conda/lib/python3.8/site-packages/cv2
+    libxext6
+
+# Check if the directory exists and then remove it
+RUN if [ -d "/opt/conda/lib/python3.8/site-packages/cv2" ]; then rm -r /opt/conda/lib/python3.8/site-packages/cv2; fi
 
 # Install the specified pip packages
 RUN pip install \
