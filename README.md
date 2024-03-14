@@ -281,3 +281,23 @@ For YOLOv8 bug reports and feature requests please visit [GitHub Issues](https:/
         2. permission might be the problem.
             
             `sudo chown yourusername:yourusername /path/to/video/file`
+
+### Test environment
+- Ubuntu 20.04
+- GPU: Gefore RTX 3060
+- NVIDIA Driver Version: 535.146.02
+- CUDA Version: 12.2
+- [packages](https://github.com/shanek16/ultralytics/blob/9949da7a2777337ff7210dba6542adcd4e016dba/installed_packages.txt)
+- Docker
+    
+    https://hub.docker.com/repository/docker/shanek16/safety/general
+    
+    `docker pull shanek16/safety:safety`
+    
+    ```python
+    docker run --gpus all -it \
+    -v ~/Project/data:/workspace/data \ # inference video files
+    -v ~/Project/ultralytics:/workspace/yolov8 \
+    -v ~/Project/weights:/workspace/weights \ # weights of models
+    shanek16/safety:safety
+    ```
