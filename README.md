@@ -260,3 +260,24 @@ For YOLOv8 bug reports and feature requests please visit [GitHub Issues](https:/
   <a href="https://discord.gg/n6cFeSPZdD" style="text-decoration:none;">
     <img src="https://github.com/ultralytics/assets/blob/main/social/logo-social-discord.png" width="3%" alt="" /></a>
 </div>
+
+## Warning algorithm
+### Inference code
+
+- `track.py`: without depth estimation
+- `track_with_depth_jtop_engine.py --input video_name`: Inference with engine file
+- `track_with_depth_jtop_onnx.py`: Inference with onnx file
+- `track_with_depth_load_from_hub.py`: Inference with pytorch file
+- Additional info:
+    - There are 2 ways to monitor jetson: jtop vs tegrastats → track_with_**
+    - if the video is locked like:
+
+      ![Locked_video](https://github.com/shanek16/ultralytics/assets/53452585/d2fe51cf-e09e-4ca5-848e-4068f65b85d1)
+        
+        1. Ubuntu may not have the codec:
+            
+            `sudo apt-get install ubuntu-restricted-extras`
+            
+        2. permission might be the problem.
+            
+            `sudo chown yourusername:yourusername /path/to/video/file`
